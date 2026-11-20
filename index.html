@@ -32,6 +32,17 @@
   .legend { display: flex; gap: 16px; font-size: 13px; color: #aaa; margin-top: 6px; }
   .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .legend .a::before { background: #4ea1ef; } .legend .c::before { background: #6fcf8d; }
+  .nav { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .nav button { flex: none; width: 38px; height: 38px; background: #222; color: #ddd; border: 1px solid #444; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 0 3px; }
+  .nav button:hover:not(:disabled) { background: #333; border-color: #777; }
+  .nav button:disabled { opacity: .3; cursor: default; }
+  .nav input[type=range] { flex: 1; min-width: 0; accent-color: #4ea1ef; cursor: pointer; height: 28px; }
+  .sel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 26px; margin-top: 10px; padding: 12px 16px; background: #222; border: 1px solid #3a3a3a; border-left: 4px solid #4ea1ef; border-radius: 10px; }
+  .sel .d { font-size: 16px; font-weight: bold; text-transform: capitalize; min-width: 190px; }
+  .sel .m { font-size: 14px; color: #bbb; }
+  .sel .m b { font-size: 22px; color: #fff; margin-right: 4px; font-variant-numeric: tabular-nums; }
+  .sel .m.c b { color: #6fcf8d; } .sel .m.a b { color: #4ea1ef; }
+  #chart svg rect.hit { cursor: pointer; }
   .note { color: #888; font-size: 13px; margin-top: 18px; }
   .reset { margin-top: 18px; text-align: right; }
   .reset button { background: transparent; color: #c98a8a; border: 1px solid #5a3a3a; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
@@ -56,6 +67,12 @@
   <div class="bar" id="periods"></div>
   <div class="kpis" id="kpis"></div>
   <div class="card"><h2>Par jour</h2><div id="chart"></div>
+    <div class="nav">
+      <button type="button" id="prev" aria-label="Jour précédent" title="Jour précédent">&#8249;</button>
+      <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="Choisir un jour">
+      <button type="button" id="next" aria-label="Jour suivant" title="Jour suivant">&#8250;</button>
+    </div>
+    <div class="sel" id="sel" aria-live="polite"></div>
     <div class="legend"><span class="a">Pages vues</span><span class="c">Visiteurs différents</span></div></div>
   <div class="grid">
     <div class="card"><h2>Pages les plus vues</h2><div id="t-pages"></div></div>
@@ -85,6 +102,8 @@ var DATA = {"days": {"2026-10-27": {"visits": 2, "views": 2, "plays": 0, "visito
 var NAMES = DATA.names;
 var DAYS = DATA.days;
 var PERIOD = 30;
+var SEL = null;        // jour sélectionné dans le graphique (« AAAA-MM-JJ »)
+var CUR = [];          // jours affichés pour la période en cours
 
 function el(id){ return document.getElementById(id); }
 function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -125,6 +144,53 @@ function table(id, obj, fmt, total){
   }).join('') + '</table>';
 }
 
+function longDate(k){
+  var p = k.split('-');
+  return new Date(+p[0], +p[1]-1, +p[2]).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+}
+
+// graphique : barres = pages vues, ligne = visiteurs ; le jour sélectionné est surligné
+function drawChart(){
+  var days = CUR, n = days.length;
+  var W = 1000, H = 240, L = 40, B = 28, T = 10;
+  var vals = days.map(function(d){ return DAYS[d] ? DAYS[d].views : 0; });
+  var vis = days.map(function(d){ return DAYS[d] ? DAYS[d].visitors : 0; });
+  var max = Math.max(1, Math.max.apply(null, vals), Math.max.apply(null, vis));
+  var bw = (W - L) / Math.max(n, 1);
+  var si = days.indexOf(SEL);
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Pages vues et visiteurs par jour">';
+  if (si >= 0) svg += '<rect x="' + (L + si*bw) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B) + '" fill="#ffffff" fill-opacity=".1" rx="3"/>';
+  [0, .5, 1].forEach(function(f){ var y = T + (H - T - B) * (1 - f);
+    svg += '<line x1="' + L + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#2a2a2a"/><text x="' + (L-6) + '" y="' + (y+4) + '" fill="#888" font-size="11" text-anchor="end">' + fr(Math.round(max*f)) + '</text>'; });
+  vals.forEach(function(v, i){ var h = (H - T - B) * v / max;
+    svg += '<rect x="' + (L + i*bw + bw*0.15) + '" y="' + (H - B - h) + '" width="' + (bw*0.7) + '" height="' + h + '" rx="2" fill="#4ea1ef"' + (i === si ? '' : ' fill-opacity="' + (si >= 0 ? '.6' : '1') + '"') + '/>'; });
+  var pts = vis.map(function(v, i){ return (L + i*bw + bw/2) + ',' + (H - B - (H - T - B) * v / max); }).join(' ');
+  if (n > 1) svg += '<polyline points="' + pts + '" fill="none" stroke="#6fcf8d" stroke-width="2.5"/>';
+  vis.forEach(function(v, i){ svg += '<circle cx="' + (L + i*bw + bw/2) + '" cy="' + (H - B - (H - T - B) * v / max) + '" r="' + (i === si ? 5.5 : (n > 45 ? 1.8 : 3)) + '" fill="#6fcf8d"' + (i === si ? ' stroke="#fff" stroke-width="2"' : '') + '/>'; });
+  var step = Math.max(1, Math.ceil(n / 8));
+  days.forEach(function(d, i){ if (i % step === 0 || i === n-1) svg += '<text x="' + (L + i*bw + bw/2) + '" y="' + (H - 8) + '" fill="#888" font-size="11" text-anchor="middle">' + d.slice(8) + '/' + d.slice(5,7) + '</text>'; });
+  // zones cliquables (une par jour), au-dessus de tout le reste
+  days.forEach(function(d, i){
+    svg += '<rect class="hit" data-i="' + i + '" x="' + (L + i*bw) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B) + '" fill="transparent"><title>' + d + ' : ' + vals[i] + ' pages vues, ' + vis[i] + ' visiteurs</title></rect>'; });
+  el('chart').innerHTML = svg + '</svg>';
+
+  // encadré du jour sélectionné
+  var r = DAYS[SEL] || {views:0, visitors:0};
+  el('sel').innerHTML = '<div class="d">' + esc(longDate(SEL)) + '</div>' +
+    '<div class="m a"><b>' + fr(r.views) + '</b>page' + (r.views > 1 ? 's' : '') + ' vue' + (r.views > 1 ? 's' : '') + '</div>' +
+    '<div class="m c"><b>' + fr(r.visitors) + '</b>visiteur' + (r.visitors > 1 ? 's' : '') + ' différent' + (r.visitors > 1 ? 's' : '') + '</div>';
+
+  var sl = el('slider');
+  sl.max = Math.max(0, n - 1); sl.value = Math.max(0, si); sl.disabled = n < 2;
+  el('prev').disabled = si <= 0; el('next').disabled = si < 0 || si >= n - 1;
+}
+
+function selectIndex(i){
+  if (!CUR.length) return;
+  i = Math.max(0, Math.min(CUR.length - 1, i));
+  SEL = CUR[i]; drawChart();
+}
+
 function render(){
   var days = listDays(PERIOD), sum = {visits:0, views:0, plays:0, visitors:0};
   var pages = {}, videos = {}, actions = {}, countries = {}, refs = {};
@@ -139,23 +205,9 @@ function render(){
     ['Visites', sum.visits], ['Pages vues', sum.views], ['Vidéos lancées', sum.plays], ['Visiteurs (par jour, cumulés)', sum.visitors]
   ].map(function(k){ return '<div class="card kpi"><div class="n">' + fr(k[1]) + '</div><div class="l">' + k[0] + '</div></div>'; }).join('');
 
-  // graphique : barres = pages vues, ligne = visiteurs
-  var W = 1000, H = 240, L = 40, B = 28, T = 10, n = days.length;
-  var vals = days.map(function(d){ return DAYS[d] ? DAYS[d].views : 0; });
-  var vis = days.map(function(d){ return DAYS[d] ? DAYS[d].visitors : 0; });
-  var max = Math.max(1, Math.max.apply(null, vals), Math.max.apply(null, vis));
-  var bw = (W - L) / Math.max(n, 1);
-  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Pages vues et visiteurs par jour">';
-  [0, .5, 1].forEach(function(f){ var y = T + (H - T - B) * (1 - f);
-    svg += '<line x1="' + L + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#2a2a2a"/><text x="' + (L-6) + '" y="' + (y+4) + '" fill="#888" font-size="11" text-anchor="end">' + fr(Math.round(max*f)) + '</text>'; });
-  vals.forEach(function(v, i){ var h = (H - T - B) * v / max;
-    svg += '<rect x="' + (L + i*bw + bw*0.15) + '" y="' + (H - B - h) + '" width="' + (bw*0.7) + '" height="' + h + '" rx="2" fill="#4ea1ef"><title>' + days[i] + ' : ' + v + ' pages vues, ' + vis[i] + ' visiteurs</title></rect>'; });
-  var pts = vis.map(function(v, i){ return (L + i*bw + bw/2) + ',' + (H - B - (H - T - B) * v / max); }).join(' ');
-  if (n > 1) svg += '<polyline points="' + pts + '" fill="none" stroke="#6fcf8d" stroke-width="2.5"/>';
-  vis.forEach(function(v, i){ svg += '<circle cx="' + (L + i*bw + bw/2) + '" cy="' + (H - B - (H - T - B) * v / max) + '" r="' + (n > 45 ? 1.8 : 3) + '" fill="#6fcf8d"/>'; });
-  var step = Math.max(1, Math.ceil(n / 8));
-  days.forEach(function(d, i){ if (i % step === 0 || i === n-1) svg += '<text x="' + (L + i*bw + bw/2) + '" y="' + (H - 8) + '" fill="#888" font-size="11" text-anchor="middle">' + d.slice(8) + '/' + d.slice(5,7) + '</text>'; });
-  el('chart').innerHTML = svg + '</svg>';
+  CUR = days;
+  if (CUR.indexOf(SEL) < 0) SEL = CUR[CUR.length - 1];
+  drawChart();
 
   table('t-pages', pages, prettyPage);
   table('t-videos', videos);
@@ -200,6 +252,10 @@ if (DATA.beacon_errors) el('warn').innerHTML += '<div class="warn">' + DATA.beac
   var b = document.createElement('button'); b.textContent = p[1]; b.setAttribute('data-p', p[0]);
   b.onclick = function(){ PERIOD = p[0]; render(); }; el('periods').appendChild(b);
 });
+el('prev').onclick = function(){ selectIndex(CUR.indexOf(SEL) - 1); };
+el('next').onclick = function(){ selectIndex(CUR.indexOf(SEL) + 1); };
+el('slider').oninput = function(){ selectIndex(+this.value); };
+el('chart').onclick = function(e){ var i = e.target.getAttribute && e.target.getAttribute('data-i'); if (i !== null && i !== undefined) selectIndex(+i); };
 if (!Object.keys(DAYS).length) el('warn').innerHTML += '<div class="warn">Aucune donnée pour le moment. Lance le script après quelques visites du site.</div>';
 render();
 </script>
